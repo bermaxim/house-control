@@ -434,3 +434,10 @@ html.ios.mode-editor body { background: var(--bg); }
 }
 .press a, .steps a { color: #a98bff; }
 .steps code { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 4px; border-radius: 5px; background: var(--glass); user-select: all; -webkit-user-select: all; }
+
+/* A lamp's fixtures (one device, several lights) and a strip around the ceiling */
+circle.p-light.member { fill: #ffb46b; stroke: #0a0e1a; stroke-width: 0.03; opacity: 0.85; }
+circle.p-light.member.linked { stroke: #6ee7a0; stroke-width: 0.04; }
+circle.p-light.member.sel { stroke: #fff; stroke-width: 0.05; opacity: 1; }
+rect.p-light.cove { fill: none; stroke: #ffb46b; stroke-width: 0.06; opacity: 0.8; }
+rect.p-light.cove.sel { stroke: #fff; }

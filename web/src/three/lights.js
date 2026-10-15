@@ -125,7 +125,8 @@ const fixtures = {
     };
   },
 
-  strip(cfg) {
+  strip(cfg, H) {
+    if (cfg.localPath) return cove(cfg, H);
     const y = cfg.y ?? 1;
     const length = cfg.length ?? 1;
     const n = Math.max(1, Math.round(length / 1.0));
@@ -143,13 +144,101 @@ const fixtures = {
   },
 };
 
+// A strip along a path (around the ceiling of a room): a thin glowing line on every
+// segment and a soft light every metre or so, without shadows.
+function cove(cfg, H) {
+  const y = cfg.y ?? H - 0.04;
+  const glow = [];
+  const lights = [];
+  const pts = cfg.localPath;
+  let total = 0;
+  for (let i = 0; i < pts.length - 1; i++) total += Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+  const n = Math.max(2, Math.min(10, Math.round(total / 1.4)));
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
+    const len = Math.hypot(bx - ax, bz - az);
+    if (len < 0.01) continue;
+    const seg = at(box(len, 0.022, 0.022, glowMaterial(), { r: 0.008 }), (ax + bx) / 2, y - 0.011, (az + bz) / 2);
+    seg.rotation.y = -Math.atan2(bz - az, bx - ax);
+    glow.push(seg);
+    minX = Math.min(minX, ax, bx); maxX = Math.max(maxX, ax, bx); minZ = Math.min(minZ, az, bz); maxZ = Math.max(maxZ, az, bz);
+  }
+  // Lights spread evenly along the whole path.
+  for (let k = 0; k < n; k++) {
+    let d = (total / n) * (k + 0.5);
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
+      const len = Math.hypot(bx - ax, bz - az);
+      if (d <= len) {
+        const t = len ? d / len : 0;
+        // A little in from the wall, so the glow washes the ceiling and the walls.
+        const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+        const x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+        const lx = x + Math.sign(cx - x) * 0.15, lz = z + Math.sign(cz - z) * 0.15;
+        lights.push(point(((cfg.intensity ?? 1.6) * Math.max(1, total / 4)) / n, y - 0.08, { shadow: false, distance: 3.6, x: lx, z: lz }));
+        break;
+      }
+      d -= len;
+    }
+  }
+  return {
+    parts: [],
+    glow,
+    lights,
+    hit: [Math.max(0.4, maxX - minX), 0.3, Math.max(0.4, maxZ - minZ), y],
+    hitAt: [(minX + maxX) / 2, (minZ + maxZ) / 2],
+  };
+}
+
+// Several fixtures driven as one lamp (a relay with nine spots): one model per point,
+// shadows only from the first so the scene stays fast.
+function group(cfg, H, build) {
+  const all = { parts: [], glow: [], lights: [], hit: null };
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  cfg.localPoints.forEach(([x, z], i) => {
+    const f = build(cfg, H);
+    for (const m of [...f.parts, ...f.glow]) { m.position.x += x; m.position.z += z; }
+    for (const l of f.lights) {
+      l.position.x += x; l.position.z += z;
+      if (l.target) { l.target.position.x += x; l.target.position.z += z; }
+      if (i > 0) l.castShadow = false;
+      l.userData.max *= 0.75;
+    }
+    all.parts.push(...f.parts);
+    all.glow.push(...f.glow);
+    all.lights.push(...f.lights);
+    all.hit ||= f.hit;
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+  });
+  const [w, h, d, y] = all.hit;
+  all.hit = [maxX - minX + w, h, maxZ - minZ + d, y];
+  all.hitAt = [(minX + maxX) / 2, (minZ + maxZ) / 2];
+  return all;
+}
+
+/** Absolute plan points → the lamp group's own frame (it sits at `pos`, turned by `rot`). */
+function toLocal(cfg, points) {
+  const a = THREE.MathUtils.degToRad(cfg.rot || 0);
+  const c = Math.cos(a), s = Math.sin(a);
+  return points.map(([x, z]) => {
+    const dx = x - cfg.pos[0], dz = z - cfg.pos[1];
+    // undo the group's rotation about Y (three.js: x' = x cos + z sin, z' = -x sin + z cos)
+    return [dx * c - dz * s, dx * s + dz * c];
+  });
+}
+
 const tmp = new THREE.Color();
 
 export class LightUnit {
   constructor(cfg, H) {
     this.cfg = cfg;
     this.id = cfg.id;
-    const f = fixtures[cfg.type](cfg, H);
+    const build = fixtures[cfg.type];
+    let f;
+    if (cfg.path) f = build({ ...cfg, localPath: toLocal(cfg, cfg.path) }, H);
+    else if (cfg.points) f = group({ ...cfg, localPoints: toLocal(cfg, cfg.points) }, H, build);
+    else f = build(cfg, H);
 
     this.group = new THREE.Group();
     this.group.position.set(cfg.pos[0], 0, cfg.pos[1]);
@@ -175,7 +264,7 @@ export class LightUnit {
 
     const [hw, hh, hd, hy] = f.hit;
     this.hit = new THREE.Mesh(new THREE.BoxGeometry(hw, hh, hd), new THREE.MeshBasicMaterial());
-    this.hit.position.y = hy;
+    this.hit.position.set(f.hitAt?.[0] ?? 0, hy, f.hitAt?.[1] ?? 0);
     this.hit.visible = false;
     this.hit.userData = { kind: 'light', id: cfg.id };
     this.group.add(this.hit);

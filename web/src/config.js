@@ -87,11 +87,23 @@ export function normalize(raw) {
     need(roomIds.has(l.room), `Light "${l.id}" refers to unknown room "${l.room}"`);
     need(LIGHT_TYPES.includes(l.type), `Light "${l.id}" has unknown type "${l.type}" (use ${LIGHT_TYPES.join(', ')})`);
     need(isPoint(l.pos), `Light "${l.id}" needs "pos": [x, z]`);
+    need(!l.points || (Array.isArray(l.points) && l.points.length && l.points.every(isPoint)),
+      `Light "${l.id}" has "points" that are not a list of [x, z]`);
+    // A strip around the room: its path follows the ceiling's edge, just inside the walls.
+    let path = null;
+    if (l.type === 'strip' && l.perimeter) {
+      const r = rooms.find((room) => room.id === l.room);
+      const i = 0.06;
+      path = [[r.x + i, r.z + i], [r.x + r.w - i, r.z + i], [r.x + r.w - i, r.z + r.d - i], [r.x + i, r.z + r.d - i], [r.x + i, r.z + i]];
+    }
     return {
       ...l,
       name: l.name || l.id,
       rot: l.rot || 0,
       capabilities: l.capabilities || [], // plain smart plugs: on/off only
+      // One device, several fixtures (a relay feeding nine spots): where each one hangs.
+      points: l.type !== 'strip' && l.points?.length ? l.points : null,
+      path,
     };
   });
 

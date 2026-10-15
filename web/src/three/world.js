@@ -280,7 +280,7 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
     const wasDrag = drag.moved;
     drag = null;
     canvas.style.cursor = 'grab';
-    if (wasDrag) return;
+    if (wasDrag || ev.button === 2) return; // a right click opens the lamp's settings instead
     const t = pick(ev);
     if (!t) { onPick(null); return; }
     if (t.kind === 'light') lights.get(t.id).bump();
@@ -288,6 +288,12 @@ export function createWorld(canvas, config, store, { onHover, onPick, background
     wake();
   };
   canvas.addEventListener('pointerup', release);
+  // Right click (or a two-finger click) on a lamp: its brightness and colour.
+  canvas.addEventListener('contextmenu', (ev) => {
+    ev.preventDefault();
+    const t = pick(ev);
+    if (t?.kind === 'light') onPick(t, { details: true });
+  });
   canvas.addEventListener('pointercancel', (ev) => {
     fingers.delete(ev.pointerId);
     if (!fingers.size) pinch = null;

@@ -287,6 +287,24 @@ export async function bootEditor(root) {
     touch();
   }
 
+  // n fixtures of one lamp spread evenly over its room in a grid; one fixture is a plain lamp again.
+  function arrangeFixtures(item, n) {
+    if (n <= 1) { delete item.points; return; }
+    const room = doc.rooms.find((r) => r.id === item.room);
+    if (!room) return;
+    const [x, z, w, d] = room.rect;
+    const cols = Math.max(1, Math.min(n, Math.round(Math.sqrt(n * w / d))));
+    const rows = Math.ceil(n / cols);
+    const points = [];
+    for (let k = 0; k < n; k++) {
+      const r = Math.floor(k / cols), c = k % cols;
+      const inRow = r === rows - 1 ? n - cols * (rows - 1) : cols;
+      points.push([fix(round(x + (w * (c + 0.5)) / inRow)), fix(round(z + (d * (r + 0.5)) / rows))]);
+    }
+    item.points = points;
+    item.pos = [fix(round(x + w / 2)), fix(round(z + d / 2))];
+  }
+
   // The middle of the room, or the nearest place around it no other lamp stands on.
   function freeSpot(room, center) {
     const [x, z, w, d] = room.rect;
@@ -386,12 +404,26 @@ export async function bootEditor(root) {
     });
 
     doc.lights.forEach((l, i) => {
+      // A group's fixtures and a strip around the ceiling, drawn where they really are.
+      const cls = `p-light ${l.type}${isSel('light', i) ? ' sel' : ''}${isLinked(l) ? ' linked' : ''}`;
+      if (l.type !== 'strip' && l.points?.length) {
+        l.points.forEach(([px, pz], k) => {
+          kids.push(sv('circle', { cx: px, cy: pz, r: 0.13, class: `${cls} member`, 'data-kind': 'light', 'data-index': i, 'data-point': k }));
+        });
+      }
+      if (l.type === 'strip' && l.perimeter) {
+        const r = doc.rooms.find((room) => room.id === l.room);
+        if (r) {
+          const [x, z, w, d] = r.rect;
+          kids.push(sv('rect', { x: x + 0.1, y: z + 0.1, width: w - 0.2, height: d - 0.2, rx: 0.05, class: `${cls} cove`, 'data-kind': 'light', 'data-index': i }));
+        }
+      }
       const g = sv('g', {
         class: `p-light ${l.type}${isSel('light', i) ? ' sel' : ''}${isLinked(l) ? ' linked' : ''}`, 'data-kind': 'light', 'data-index': i,
         transform: `translate(${l.pos[0]} ${l.pos[1]}) rotate(${-(l.rot || 0)})`,
       });
       if (big) g.append(sv('circle', { r: 0.58, class: 'hit' }));
-      if (l.type === 'strip') {
+      if (l.type === 'strip' && !l.perimeter) {
         const len = l.length || 1;
         g.append(sv('rect', { x: -len / 2, y: -0.07, width: len, height: 0.14, rx: 0.07 }));
       } else {
@@ -441,6 +473,8 @@ export async function bootEditor(root) {
     if (!kind || kind === 'none') { select({ kind: 'home' }); return; }
     plan.setPointerCapture(ev.pointerId);
     startDrag(kind, Number(el.dataset.index), ev);
+    // One fixture of a group: only that one moves.
+    if (drag && el.dataset.point != null) drag.point = Number(el.dataset.point);
   });
 
   // Picks up an item (or a room's resize handle) under the pointer.
@@ -459,7 +493,7 @@ export async function bootEditor(root) {
       drag.rect = [...item.rect];
       // Everything standing in the room travels with it.
       drag.riders = [
-        ...doc.lights.filter((l) => l.room === item.id).map((o) => ({ o, pos: [...o.pos] })),
+        ...doc.lights.filter((l) => l.room === item.id).map((o) => ({ o, pos: [...o.pos], points: o.points?.map((p) => [...p]) })),
         ...doc.acs.filter((a) => a.room === item.id).map((o) => ({ o, pos: [...o.pos] })),
         ...doc.furniture.filter((f) => Array.isArray(f.pos) && inside(f.pos)).map((o) => ({ o, pos: [...o.pos] })),
       ];
@@ -469,6 +503,7 @@ export async function bootEditor(root) {
       drag.to = [...item.to];
     } else {
       drag.pos = [...item.pos];
+      drag.points = item.points?.map((p) => [...p]);
     }
   }
 
@@ -491,7 +526,10 @@ export async function bootEditor(root) {
       const mz = round(pz - drag.start[1], 0.1);
       item.rect[0] = fix(drag.rect[0] + mx);
       item.rect[1] = fix(drag.rect[1] + mz);
-      for (const r of drag.riders) r.o.pos = [fix(r.pos[0] + mx), fix(r.pos[1] + mz)];
+      for (const r of drag.riders) {
+        r.o.pos = [fix(r.pos[0] + mx), fix(r.pos[1] + mz)];
+        if (r.points) r.o.points = r.points.map(([x, z]) => [fix(x + mx), fix(z + mz)]);
+      }
       for (const r of drag.openings) {
         r.o.from = [fix(r.from[0] + mx), fix(r.from[1] + mz)];
         r.o.to = [fix(r.to[0] + mx), fix(r.to[1] + mz)];
@@ -502,7 +540,14 @@ export async function bootEditor(root) {
     } else if (drag.kind === 'ac') {
       snapAC(item, [px, pz]);
     } else {
+      if (drag.point != null && drag.points) {
+        item.points = drag.points.map((p) => [...p]);
+        item.points[drag.point] = [fix(drag.points[drag.point][0] + dx), fix(drag.points[drag.point][1] + dz)];
+        touch();
+        return;
+      }
       item.pos = [fix(drag.pos[0] + dx), fix(drag.pos[1] + dz)];
+      if (drag.points) item.points = drag.points.map(([x, z]) => [fix(x + dx), fix(z + dz)]);
       if (drag.kind === 'light') {
         const room = roomAt(item.pos);
         if (room) item.room = room.id;
@@ -613,7 +658,15 @@ export async function bootEditor(root) {
         row(bind('X', number(), { ...at(item, 'pos', 0), parse: parseNum }), bind('Z', number(), { ...at(item, 'pos', 1), parse: parseNum })),
         row(bind('Height (auto if empty)', number(), { ...optional(item, 'y'), parse: optNum }),
           bind('Rotation, °', number(15), { ...prop(item, 'rot', 0), parse: parseNum })),
-        item.type === 'strip' ? bind('Strip length, m', number(0.1), { ...prop(item, 'length', 1), parse: parseNum }) : null),
+        item.type === 'strip' ? row(
+          bind('Strip length, m', number(0.1), { ...prop(item, 'length', 1), parse: parseNum }),
+          bind('Around the ceiling', h('input', { type: 'checkbox' }), { ...prop(item, 'perimeter', false), event: 'change' }))
+          : bind('Fixtures on this device', number(1), {
+            get: () => item.points?.length || 1,
+            set: (n) => arrangeFixtures(item, n),
+            parse: (v) => (Number.isInteger(+v) && +v >= 1 && +v <= 30 ? +v : undefined),
+          }),
+        item.points?.length ? h('p.note', 'One switch, several fixtures. Drag a small dot to move one fixture, the big one to move them all.') : null),
       section('What it can do',
         h('div.checks',
           bind('Dimming', h('input', { type: 'checkbox' }), { ...cap('brightness'), event: 'change' }),

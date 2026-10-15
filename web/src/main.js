@@ -75,9 +75,10 @@ async function boot() {
   try {
     world = createWorld(panel.canvas, config, store, {
       onHover: panel.showTooltip,
-      onPick(target) {
+      onPick(target, { details = false } = {}) {
         if (!target) return;
-        if (target.kind === 'light') { haptic('light'); store.toggleLight(target.id); }
+        if (target.kind === 'light' && details) panel.openSheet(target);
+        else if (target.kind === 'light') { haptic('light'); store.toggleLight(target.id); }
         else if (target.kind === 'ac') panel.openSheet(target);
         else if (target.kind === 'room') panel.selectRoom(target.id);
       },
