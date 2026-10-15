@@ -35,6 +35,11 @@ if [ -n "${CODESIGN_IDENTITY:-}" ]; then
 fi
 GROUP="${TEAM:+$TEAM.}io.github.0xprobabillity.HouseControl"
 
+# Widgets need full Xcode and XcodeGen; without them the app is built without widgets.
+if [ -z "${SKIP_WIDGETS:-}" ] && { ! command -v xcodegen >/dev/null || ! xcodebuild -version >/dev/null 2>&1; }; then
+  echo "▸ Skipping widgets (needs Xcode and XcodeGen)"
+  SKIP_WIDGETS=1
+fi
 if [ -z "${SKIP_WIDGETS:-}" ]; then
   echo "▸ Building widgets"
   cd "$ROOT/widgets"

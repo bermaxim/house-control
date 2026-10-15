@@ -65,7 +65,10 @@ public final class WidgetBridge {
         let work = DispatchWorkItem { [weak self] in
             self?.lastReload = Date()
             WidgetCenter.shared.reloadAllTimelines()
+            // ControlCenter is in the macOS 26 SDK only: older Xcode builds go without it.
+            #if os(iOS) || compiler(>=6.2)
             if #available(iOS 18.0, macOS 26.0, *) { ControlCenter.shared.reloadAllControls() }
+            #endif
         }
         reload = work
         let wait = max(0.15, 0.6 - Date().timeIntervalSince(lastReload))
