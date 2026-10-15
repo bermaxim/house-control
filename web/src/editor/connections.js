@@ -16,7 +16,7 @@ const LOOK = {
 };
 const KIND_TITLES = { light: 'Lights and plugs', ac: 'Air conditioners', sensor: 'Temperature sensors' };
 
-export function createConnections({ rerender, toast, usedBy, onOpen }) {
+export function createConnections({ rerender, toast, usedBy, onOpen, onImportAlice }) {
   const boot = window.__HOUSE_BOOT__ || {};
   const state = {
     info: boot.services || {},
@@ -248,7 +248,18 @@ export function createConnections({ rerender, toast, usedBy, onOpen }) {
     const info = state.info.yandex || {};
     if (info.connected) {
       if (!state.devices && !state.loading) setTimeout(() => load(), 0);
+      const list = devicesOf('yandex').filter((d) => d.kind !== 'sensor');
+      const unlinked = list.filter((d) => !usedBy().has(`yandex|${d.id}`)).length;
       return [connectedHeader('yandex', 'Home', info.name, 'Yandex Smart Home · changes made through Alice show up within a few seconds'),
+        onImportAlice && state.devices ? section('Your home in 3D',
+          h('p.note', unlinked
+            ? `${unlinked} of ${list.length} Alice devices are not on the plan yet.`
+            : 'Every Alice device is on the plan.'),
+          h('div.fields',
+            h('button.btn.primary', { onclick: () => onImportAlice(true), disabled: !list.length }, icon('home', 14), 'Build my home from Alice'),
+            h('button.btn', { onclick: () => onImportAlice(false), disabled: !unlinked }, icon('plus', 14), 'Add the missing ones')),
+          h('p.note', '“Build” makes a room for every room in Alice and puts each lamp, socket, switch and AC in it, already linked. Then drag the rooms into the shape of your flat.'))
+          : null,
         deviceList('yandex')];
     }
     if (ya.login) {

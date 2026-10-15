@@ -10,6 +10,7 @@ import { h, clamp } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
 import { isNative, isPhone, call, post, haptic, incoming } from '../bridge.js';
 import { createConnections } from './connections.js';
+import { importAlice } from './alice-import.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const sv = (tag, attrs = {}, ...kids) => {
@@ -64,6 +65,16 @@ export async function bootEditor(root) {
     // On the iPhone the connection screens are native ones, shown over the editor.
     onOpen: (service) => (isPhone && service ? post('openConnection', { service })
       : select(service ? { kind: 'service', service } : { kind: 'connections' })),
+    onImportAlice: (replace) => {
+      const r = importAlice(doc, links.state.devices || [], { replace });
+      if (!r.rooms && !r.lights && !r.acs && !replace) return toast('Nothing new to add');
+      snapshot();
+      doc = r.doc;
+      nameInput.value = doc.name || 'Home';
+      sel = { kind: 'home' };
+      touch();
+      toast(`Added ${r.rooms} rooms, ${r.lights} lamps, ${r.acs} ACs — arrange the rooms, then “Save & apply”`);
+    },
   });
   // Smart Life signed in or out on its own screen: the overview and the pickers follow.
   const smartLifeChanged = () => links.refreshInfo().then(() => links.load({ quiet: true }));
