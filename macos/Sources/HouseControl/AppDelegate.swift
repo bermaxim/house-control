@@ -222,7 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         boot["services"] = hub.servicesInfo
         switch ProcessInfo.processInfo.environment["HOUSE_OPEN_EDITOR"] {
         case "smartlife": boot["section"] = "service:smartlife"
-        case "homeassistant", "hue", "homekit", "connections":
+        case "homeassistant", "hue", "homekit", "yandex", "connections":
             let section = ProcessInfo.processInfo.environment["HOUSE_OPEN_EDITOR"]!
             boot["section"] = section == "connections" ? "connections" : "service:\(section)"
         default: break
@@ -462,6 +462,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 do {
                     try await hub.connectHomeAssistant(url: message["url"] as? String ?? "", token: message["token"] as? String ?? "")
+                    connectionsChanged()
+                    host.reply(to: message, hub.servicesInfo)
+                } catch {
+                    host.reply(to: message, ["error": error.localizedDescription])
+                }
+            }
+        case "yandex.begin":
+            Task { @MainActor in
+                do {
+                    let login = try await hub.beginYandexLogin(clientId: message["clientId"] as? String ?? "",
+                                                              clientSecret: message["clientSecret"] as? String ?? "")
+                    host.reply(to: message, ["deviceCode": login.deviceCode, "userCode": login.userCode, "url": login.url,
+                                             "interval": login.interval, "expiresIn": login.expiresIn])
+                } catch {
+                    host.reply(to: message, ["error": error.localizedDescription])
+                }
+            }
+        case "yandex.poll":
+            Task { @MainActor in
+                do {
+                    if try await hub.finishYandexLogin(deviceCode: message["deviceCode"] as? String ?? "") {
+                        connectionsChanged()
+                        host.reply(to: message, hub.servicesInfo)
+                    } else {
+                        host.reply(to: message, ["waiting": true])
+                    }
+                } catch {
+                    host.reply(to: message, ["error": error.localizedDescription])
+                }
+            }
+        case "yandex.connect":
+            Task { @MainActor in
+                do {
+                    try await hub.connectYandex(token: message["token"] as? String ?? "")
                     connectionsChanged()
                     host.reply(to: message, hub.servicesInfo)
                 } catch {

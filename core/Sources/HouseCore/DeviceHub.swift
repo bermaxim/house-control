@@ -11,10 +11,12 @@ public final class DeviceHub {
     public let cloud: LinkedCloud?
     public let homeAssistant: HomeAssistantService
     public let hue: HueService
+    /// Yandex Smart Home ("Дом с Алисой"), through its cloud API.
+    public let yandex: YandexService
     /// Apple Home: HomeKit itself on the iPhone, the iPhone's catalog on the Mac.
     public let homeKit: DeviceService
     /// The platforms other than Smart Life, by the id a plan's `link.service` uses.
-    public var services: [DeviceService] { [homeAssistant, hue, homeKit] }
+    public var services: [DeviceService] { [yandex, homeAssistant, hue, homeKit] }
     private func service(_ id: String) -> DeviceService? { services.first { $0.id == id } }
     /// Smart Life when it is part of this build and signed in.
     private var connectedCloud: LinkedCloud? { cloud?.isConnected == true ? cloud : nil }
@@ -51,6 +53,7 @@ public final class DeviceHub {
         self.cloud = cloud?(directory, vault)
         homeAssistant = HomeAssistantService(vault: vault("homeassistant"))
         hue = HueService(vault: vault("hue"))
+        yandex = YandexService(vault: vault("yandex"))
         self.homeKit = homeKit ?? RemoteCatalogService(id: "homekit", title: "Apple Home",
                                                        file: directory.appendingPathComponent("homekit-devices.json"))
         for service in services {
@@ -278,7 +281,7 @@ public final class DeviceHub {
 
     /// The platforms whose connection travels between paired devices. (Apple Home is the
     /// phone's own; a Smart Life session cannot be shared, Tuya rotates its tokens.)
-    public static let shareablePlatforms = ["homeassistant", "hue"]
+    public static let shareablePlatforms = ["homeassistant", "hue", "yandex"]
 
     /// When each shareable platform was last connected or disconnected on this device, or
     /// adopted from another one: the newer side wins when two devices disagree.
@@ -293,7 +296,30 @@ public final class DeviceHub {
     private let stampsURL: URL
 
     private func shareable(_ id: String) -> [String: Any]? {
-        id == "homeassistant" ? homeAssistant.shareable : id == "hue" ? hue.shareable : nil
+        switch id {
+        case "homeassistant": homeAssistant.shareable
+        case "hue": hue.shareable
+        case "yandex": yandex.shareable
+        default: nil
+        }
+    }
+
+    /// Yandex, step one: a code to confirm on oauth.yandex.ru/device.
+    public func beginYandexLogin(clientId: String, clientSecret: String) async throws -> YandexService.Login {
+        try await yandex.beginLogin(clientId: clientId, clientSecret: clientSecret)
+    }
+
+    /// Yandex, step two: true once the code was confirmed and the token kept.
+    public func finishYandexLogin(deviceCode: String) async throws -> Bool {
+        let done = try await yandex.finishLogin(deviceCode: deviceCode)
+        if done { stamp("yandex") }
+        return done
+    }
+
+    /// Yandex with a token pasted by hand.
+    public func connectYandex(token: String) async throws {
+        try await yandex.connect(token: token)
+        stamp("yandex")
     }
 
     /// Connects Home Assistant (checking the address and token first) and remembers when.
@@ -356,6 +382,8 @@ public final class DeviceHub {
                 services.first { $0.id == id }?.disconnect()
             } else if id == "homeassistant" {
                 homeAssistant.adopt(incoming)
+            } else if id == "yandex" {
+                yandex.adopt(incoming)
             } else {
                 hue.adopt(incoming)
             }

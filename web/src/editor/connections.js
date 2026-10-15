@@ -6,8 +6,9 @@ import { icon } from '../ui/icons.js';
 import { isNative, call } from '../bridge.js';
 import { SERVICES, linkOf } from '../config.js';
 
-const ORDER = ['smartlife', 'homeassistant', 'hue', 'homekit'];
+const ORDER = ['yandex', 'smartlife', 'homeassistant', 'hue', 'homekit'];
 const LOOK = {
+  yandex: { icon: 'alice', tint: '#8a5cff', blurb: 'Дом с Алисой: everything Alice controls, through the Yandex cloud' },
   smartlife: { icon: 'plug', tint: '#ff7a3d', blurb: 'Tuya, Smart Life and the many brands built on them' },
   homeassistant: { icon: 'homeassistant', tint: '#18bcf2', blurb: 'Everything it runs: Zigbee, Matter, Nest, Xiaomi, Sonoff…' },
   hue: { icon: 'bulb', tint: '#c38bff', blurb: 'A Hue Bridge on this network. No account needed' },
@@ -80,7 +81,7 @@ export function createConnections({ rerender, toast, usedBy, onOpen }) {
     }
     if (!info.connected) return 'Not connected';
     const count = devicesOf(id).length;
-    const name = id === 'homeassistant' ? info.name : id === 'hue' ? info.name : id === 'smartlife' ? info.account : '';
+    const name = ['homeassistant', 'hue', 'yandex'].includes(id) ? info.name : id === 'smartlife' ? info.account : '';
     return [name, state.devices ? `${count} device${count === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ') || 'Connected';
   }
 
@@ -196,6 +197,97 @@ export function createConnections({ rerender, toast, usedBy, onOpen }) {
     ];
   }
 
+  /* ---------- Yandex (Дом с Алисой) ---------- */
+
+  const ya = { clientId: '', clientSecret: '', token: '', error: null, busy: false, login: null, showToken: false };
+  try { ya.clientId = localStorage.getItem('yandex.clientId') || ''; } catch { /* private storage */ }
+  let yaTimer = 0;
+  function stopYandex() { clearTimeout(yaTimer); yaTimer = 0; ya.login = null; }
+
+  async function beginYandex() {
+    ya.busy = true; ya.error = null; rerender();
+    try {
+      try { localStorage.setItem('yandex.clientId', ya.clientId.trim()); } catch { /* ignore */ }
+      const r = await call('yandex.begin', { clientId: ya.clientId, clientSecret: ya.clientSecret });
+      ya.login = { ...r, until: Date.now() + r.expiresIn * 1000 };
+      const tick = async () => {
+        if (!ya.login) return;
+        if (Date.now() > ya.login.until) { ya.error = 'The code expired. Start again.'; stopYandex(); rerender(); return; }
+        try {
+          const res = await call('yandex.poll', { deviceCode: ya.login.deviceCode });
+          if (res.waiting) { yaTimer = setTimeout(tick, Math.max(3, ya.login.interval) * 1000); rerender(); return; }
+          stopYandex();
+          state.info = res;
+          ya.clientSecret = '';
+          toast(`Connected to ${state.info.yandex?.name || 'Yandex'}`);
+          await load();
+        } catch (e) { ya.error = e.message; stopYandex(); }
+        rerender();
+      };
+      yaTimer = setTimeout(tick, Math.max(3, ya.login.interval) * 1000);
+    } catch (e) { ya.error = e.message; }
+    ya.busy = false;
+    rerender();
+  }
+
+  async function connectYandexToken() {
+    ya.busy = true; ya.error = null; rerender();
+    try {
+      state.info = await call('yandex.connect', { token: ya.token });
+      ya.token = '';
+      toast(`Connected to ${state.info.yandex?.name || 'Yandex'}`);
+      await load();
+    } catch (e) { ya.error = e.message; }
+    ya.busy = false;
+    rerender();
+  }
+
+  const extLink = (href, text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
+
+  function yandex() {
+    const info = state.info.yandex || {};
+    if (info.connected) {
+      if (!state.devices && !state.loading) setTimeout(() => load(), 0);
+      return [connectedHeader('yandex', 'Home', info.name, 'Yandex Smart Home · changes made through Alice show up within a few seconds'),
+        deviceList('yandex')];
+    }
+    if (ya.login) {
+      const left = Math.max(0, Math.ceil((ya.login.until - Date.now()) / 1000));
+      return [section('Confirm in Yandex',
+        h('div.press',
+          h('div.ya-code', ya.login.userCode),
+          h('div', h('b', 'Open ', extLink(ya.login.url, ya.login.url.replace('https://', '')), ' and enter this code'),
+            h('span', `Sign in with the Yandex ID your Alice devices are on · waiting, ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} left`))),
+        h('div.fields', h('button.btn', { onclick: () => { stopYandex(); rerender(); } }, 'Cancel')))];
+    }
+    const field = (key, attrs) => {
+      const input = h('input', { spellcheck: 'false', autocomplete: 'off', ...attrs, value: ya[key] });
+      input.addEventListener('input', () => { ya[key] = input.value; signIn.disabled = !ready(); tokenButton.disabled = !ya.token.trim() || ya.busy; });
+      return input;
+    };
+    const ready = () => isNative && !ya.busy && ya.clientId.trim() && ya.clientSecret.trim();
+    const signIn = h('button.btn.primary.wide', { onclick: beginYandex, disabled: !ready() }, ya.busy ? 'Asking Yandex…' : 'Sign in with Yandex');
+    const tokenButton = h('button.btn.wide', { onclick: connectYandexToken, disabled: !ya.token.trim() || ya.busy || !isNative }, 'Connect with this token');
+    return [
+      section('Sign in',
+        h('ol.steps',
+          h('li', 'Create an app on ', extLink('https://oauth.yandex.ru/client/new', 'oauth.yandex.ru'), ' (once): name it “House Control”, platform “Web services”, Redirect URI ',
+            h('code', 'https://oauth.yandex.ru/verification_code'), '.'),
+          h('li', 'Under data access add “Умный дом” → ', h('code', 'iot:view'), ' and ', h('code', 'iot:control'), '. Save.'),
+          h('li', 'Copy its ClientID and Client secret here and press Sign in. Yandex shows a code to confirm.')),
+        h('label.field', h('span', 'ClientID'), field('clientId', { type: 'text', placeholder: '32 hex characters' })),
+        h('label.field', h('span', 'Client secret'), field('clientSecret', { type: 'password', placeholder: 'Client secret' })),
+        signIn,
+        ya.error ? h('p.note.bad', ya.error) : null,
+        h('p.note', 'The token stays on this Mac. It reaches every device in your Yandex home: lamps, sockets, switches, air conditioners and thermometers.')),
+      section('Or paste a token',
+        ya.showToken ? [
+          h('label.field', h('span', 'OAuth token'), field('token', { type: 'password', placeholder: 'y0_…' })),
+          tokenButton,
+        ] : h('button.btn.link', { onclick: () => { ya.showToken = true; rerender(); } }, icon('key', 13), 'I already have a token')),
+    ];
+  }
+
   /* ---------- Philips Hue ---------- */
 
   let pairTimer = 0;
@@ -295,6 +387,7 @@ export function createConnections({ rerender, toast, usedBy, onOpen }) {
 
   function detail(id, smartLifePanel) {
     if (id === 'smartlife') return smartLifePanel();
+    if (id === 'yandex') return yandex();
     if (id === 'homeassistant') return homeAssistant();
     if (id === 'hue') return hue();
     return homeKit();
@@ -335,7 +428,7 @@ export function createConnections({ rerender, toast, usedBy, onOpen }) {
     const current = link ? `${link.service}|${link.id}` : '';
     if (!anyConnected()) {
       return section('Real device',
-        h('p.note', 'Simulated. Connect Smart Life, Home Assistant, Philips Hue or Apple Home to control the real one.'),
+        h('p.note', 'Simulated. Connect Yandex, Smart Life, Home Assistant, Philips Hue or Apple Home to control the real one.'),
         h('button.btn.wide', { onclick: () => onOpen(null) }, icon('link', 14), 'Open Connections'));
     }
     if (!state.devices && !state.loading) setTimeout(() => load({ quiet: true }), 0);
@@ -407,7 +500,7 @@ export function createConnections({ rerender, toast, usedBy, onOpen }) {
 
   return {
     state, load, refreshInfo, sidebarRow, overview, detail, tile, deviceSection, sensorSection, usedMap,
-    connected, stopPairing,
+    connected, stopPairing: () => { stopPairing(); stopYandex(); },
     title: (id) => SERVICES[id]?.name,
     blurb: (id) => LOOK[id]?.blurb,
   };
