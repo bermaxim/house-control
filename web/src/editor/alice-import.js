@@ -21,6 +21,15 @@ export function lampType(name) {
   return LAMP_TYPES.find(([, words]) => words.some((w) => n.includes(w)))?.[0] || 'ceiling';
 }
 
+const ROOM_ALIASES = [
+  ['коридор', 'прихож', 'холл', 'hall', 'entr'],
+  ['ванн', 'санузел', 'туалет', 'bath', 'toilet'],
+  ['кухн', 'kitchen'],
+  ['комнат', 'гостин', 'спальн', 'зал', 'living', 'bedroom'],
+  ['балкон', 'лоджи', 'balcony'],
+  ['кладов', 'гардероб', 'closet'],
+];
+
 const slug = (s) => (s || 'room').toLowerCase()
   .replace(/[^a-zа-яё0-9]+/gi, '-').replace(/^-|-$/g, '') || 'room';
 
@@ -48,12 +57,19 @@ export function importAlice(source, devices, { replace = false } = {}) {
 
   // Rooms: one per Yandex room that has something to show, matched by name.
   const byName = new Map(doc.rooms.map((r) => [r.name.trim().toLowerCase(), r]));
+  // Alice calls a room whatever its owner typed: "Прихожая" is the plan's "Коридор".
+  const alias = (key) => {
+    const group = ROOM_ALIASES.find((g) => g.some((w) => key.includes(w)));
+    return group && doc.rooms.find((r) => group.some((w) => r.name.toLowerCase().includes(w)));
+  };
   let slot = 0;
   const startX = doc.rooms.length ? Math.max(...doc.rooms.map((r) => r.rect[0] + r.rect[2])) + 1 : 0;
   const roomFor = (name) => {
     const title = name || 'Без комнаты';
     const key = title.trim().toLowerCase();
     if (byName.has(key)) return byName.get(key);
+    const similar = !replace && name ? alias(key) : null;
+    if (similar) { byName.set(key, similar); return similar; }
     const col = slot % PER_ROW, row = Math.floor(slot / PER_ROW);
     slot++;
     const room = { id: uniqueId(slug(title)), name: title, rect: [fix(startX + col * ROOM), fix(row * ROOM), ROOM, ROOM], floor: 'oak' };
