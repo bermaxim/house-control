@@ -60,6 +60,9 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/HouseControl"
 cp -R "$ROOT/web/dist" "$APP/Contents/Resources/web"
 [ -f "$ROOT/macos/AppIcon.icns" ] && cp "$ROOT/macos/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+# SEED_PLAN (or seed-plan.json in the repo root, not committed) becomes the user's plan on first launch.
+SEED="${SEED_PLAN:-$ROOT/seed-plan.json}"
+[ -f "$SEED" ] && cp "$SEED" "$APP/Contents/Resources/seed-plan.json" && echo "▸ Bundled seed plan $(basename "$SEED")"
 if [ -n "${APPEX:-}" ]; then
   mkdir -p "$APP/Contents/PlugIns"
   cp -R "$APPEX" "$APP/Contents/PlugIns/"

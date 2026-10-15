@@ -42,3 +42,4 @@ widgets/Config/Info-*.plist
 widgets/Config/*.entitlements
 widgets/build/
 widgets/.build/
+seed-plan.json

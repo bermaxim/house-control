@@ -86,6 +86,20 @@ public final class PlanStore {
         try saveCustom(Self.validate(try Data(contentsOf: url)))
     }
 
+    /// A plan built into the app (`seed-plan.json`, see scripts/build-app.sh) becomes the
+    /// user's plan the first time this exact file is seen — so a build can ship someone's
+    /// own flat, while edits made in the app afterwards are kept until the seed changes.
+    @discardableResult
+    public func adoptSeed(_ url: URL?) -> Bool {
+        guard let url, let data = try? Data(contentsOf: url), (try? Self.validate(data)) != nil else { return false }
+        let revision = Self.revision(of: data)
+        let key = "seedPlanRevision"
+        guard UserDefaults.standard.string(forKey: key) != revision else { return false }
+        do { try saveCustom(data: data) } catch { return false }
+        UserDefaults.standard.set(revision, forKey: key)
+        return true
+    }
+
     /// Forgets the user's plan and falls back to the bundled demo.
     public func removeCustom() {
         try? FileManager.default.removeItem(at: customPlanURL)

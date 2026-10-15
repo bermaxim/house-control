@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let widgets = WidgetBridge()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        plans.adoptSeed(Bundle.main.url(forResource: "seed-plan", withExtension: "json"))
         buildMainMenu()
         stopTunnelOnSignals()
 
